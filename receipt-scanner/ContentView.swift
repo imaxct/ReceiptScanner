@@ -851,7 +851,12 @@ enum ReceiptParser {
         ]
         let subtotalKeywords = ["subtotal", "sub total", "sub-total", "merchandise total"]
         // Lines we should never treat as the customer total even if they contain "amount" etc.
-        let nonTotalNoise = ["tip", "gratuity", "change", "cash back", "cashback", "rounding"]
+        // "savings"/"discount"/"coupon" totals belong to promos, not what the customer paid.
+        let nonTotalNoise = [
+            "tip", "gratuity", "change", "cash back", "cashback", "rounding",
+            "saving", "savings", "discount", "coupon", "rewards", "reward",
+            "markdown", "you saved"
+        ]
 
         var totalCandidates: [(priority: Int, value: Double)] = []
         var taxCandidates: [(priority: Int, value: Double, raw: String)] = []
