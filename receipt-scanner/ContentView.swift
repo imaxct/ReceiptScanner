@@ -19,6 +19,9 @@ struct RootTabView: View {
             ReceiptListView()
                 .tabItem { Label("Receipts", systemImage: "doc.text.viewfinder") }
 
+            SummaryView()
+                .tabItem { Label("Summary", systemImage: "chart.bar.xaxis") }
+
             AccountView()
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
         }
@@ -468,6 +471,161 @@ struct ReceiptEditorView: View {
             receipt.tax = tax
             receipt.note = note
             onSave(receipt)
+        }
+    }
+}
+
+// MARK: - Summary Tab
+
+enum SummaryPeriod: String, CaseIterable, Identifiable {
+    case week = "Weekly"
+    case month = "Monthly"
+    case year = "Yearly"
+
+    var id: String { rawValue }
+
+    var calendarComponent: Calendar.Component {
+        switch self {
+        case .week: return .weekOfYear
+        case .month: return .month
+        case .year: return .year
+        }
+    }
+
+    /// How many most-recent buckets to show.
+    var bucketCount: Int {
+        switch self {
+        case .week: return 12
+        case .month: return 12
+        case .year: return 5
+        }
+    }
+}
+
+struct SummaryBucket: Identifiable {
+    let id: Date          // start of the bucket
+    let start: Date
+    let end: Date
+    let label: String
+    var total: Double
+    var tax: Double
+    var count: Int
+}
+
+struct SummaryView: View {
+    @Query(sort: \Receipt.timestamp, order: .reverse) private var receipts: [Receipt]
+    @State private var period: SummaryPeriod = .month
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Period", selection: $period) {
+                        ForEach(SummaryPeriod.allCases) { p in
+                            Text(p.rawValue).tag(p)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
+
+                let buckets = makeBuckets()
+                let totals = buckets.reduce(into: (spent: 0.0, tax: 0.0, count: 0)) { acc, b in
+                    acc.spent += b.total; acc.tax += b.tax; acc.count += b.count
+                }
+
+                Section("Totals (last \(period.bucketCount) \(period.rawValue.lowercased()))") {
+                    summaryRow(title: "Spent", value: totals.spent.formatted(.currency(code: "USD")))
+                    summaryRow(title: "Tax", value: totals.tax.formatted(.currency(code: "USD")))
+                    summaryRow(title: "Receipts", value: "\(totals.count)")
+                }
+
+                Section("By \(period.rawValue.dropLast(2))") {
+                    if buckets.allSatisfy({ $0.count == 0 }) {
+                        Text("No receipts in this period.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(buckets) { bucket in
+                            bucketRow(bucket)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Summary")
+        }
+    }
+
+    private func summaryRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.headline.monospacedDigit())
+        }
+    }
+
+    private func bucketRow(_ bucket: SummaryBucket) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bucket.label).font(.headline)
+                Text("\(bucket.count) receipt\(bucket.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(bucket.total, format: .currency(code: "USD"))
+                    .font(.headline.monospacedDigit())
+                Text("Tax \(bucket.tax, format: .currency(code: "USD"))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Build the most recent N buckets for the selected period, oldest → newest reversed for display.
+    private func makeBuckets() -> [SummaryBucket] {
+        let calendar = Calendar.current
+        let now = Date()
+        var buckets: [SummaryBucket] = []
+        for offset in 0..<period.bucketCount {
+            guard
+                let bucketDate = calendar.date(byAdding: period.calendarComponent, value: -offset, to: now),
+                let interval = calendar.dateInterval(of: period.calendarComponent, for: bucketDate)
+            else { continue }
+            buckets.append(SummaryBucket(
+                id: interval.start,
+                start: interval.start,
+                end: interval.end,
+                label: bucketLabel(for: interval.start),
+                total: 0, tax: 0, count: 0
+            ))
+        }
+
+        for receipt in receipts {
+            if let idx = buckets.firstIndex(where: { receipt.timestamp >= $0.start && receipt.timestamp < $0.end }) {
+                buckets[idx].total += receipt.total
+                buckets[idx].tax += receipt.tax
+                buckets[idx].count += 1
+            }
+        }
+
+        return buckets
+    }
+
+    private func bucketLabel(for date: Date) -> String {
+        let f = DateFormatter()
+        switch period {
+        case .week:
+            let endDate = Calendar.current.date(byAdding: .day, value: 6, to: date) ?? date
+            f.dateFormat = "MMM d"
+            return "\(f.string(from: date)) – \(f.string(from: endDate))"
+        case .month:
+            f.dateFormat = "MMMM yyyy"
+            return f.string(from: date)
+        case .year:
+            f.dateFormat = "yyyy"
+            return f.string(from: date)
         }
     }
 }
