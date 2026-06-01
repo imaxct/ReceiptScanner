@@ -846,8 +846,9 @@ enum ReceiptParser {
             "you pay", "order total", "net total", "total", "balance", "amount"
         ]
         let taxKeywords = [
-            "total tax", "tax total", "sales tax", "state tax", "county tax",
-            "city tax", "local tax", "tax"
+            "total tax", "tax total", "sales tax", "salestax",
+            "state tax", "statetax", "county tax", "city tax",
+            "local tax", "tax"
         ]
         let subtotalKeywords = ["subtotal", "sub total", "sub-total", "merchandise total"]
         // Lines we should never treat as the customer total even if they contain "amount" etc.
@@ -893,9 +894,9 @@ enum ReceiptParser {
             result.total = all.max()
         }
 
-        // Tax: prefer "total tax"/"tax total"/"sales tax" line if present;
+        // Tax: prefer "total tax"/"tax total"/"sales tax"/"salestax" line if present;
         // otherwise sum all per-rate tax lines (state + county + city, etc.).
-        if let totalTax = taxCandidates.first(where: { $0.priority <= 2 }) {
+        if let totalTax = taxCandidates.first(where: { $0.priority <= 3 }) {
             result.tax = totalTax.value
         } else if !taxCandidates.isEmpty {
             // Deduplicate by amount to avoid summing a single tax printed twice.
