@@ -856,7 +856,9 @@ enum ReceiptParser {
         let nonTotalNoise = [
             "tip", "gratuity", "change", "cash back", "cashback", "rounding",
             "saving", "savings", "discount", "coupon", "rewards", "reward",
-            "markdown", "you saved"
+            "markdown", "you saved",
+            // Item-count summaries like "Total 10.91 Items" / "12 items" — not money.
+            "items", "item count", "qty", "quantity"
         ]
 
         var totalCandidates: [(priority: Int, value: Double)] = []
@@ -886,8 +888,13 @@ enum ReceiptParser {
             }
         }
 
-        // Total: highest-priority keyword match, else largest amount overall.
-        if let best = totalCandidates.min(by: { $0.priority < $1.priority }) {
+        // Total: highest-priority keyword match (ties broken by larger amount,
+        // since the real total often appears multiple times near the bottom),
+        // else largest amount overall.
+        if let best = totalCandidates.min(by: { a, b in
+            if a.priority != b.priority { return a.priority < b.priority }
+            return a.value > b.value
+        }) {
             result.total = best.value
         } else {
             let all = rows.flatMap { extractAmounts(from: $0) }
