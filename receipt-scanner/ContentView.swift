@@ -986,12 +986,13 @@ enum ReceiptParser {
         return sorted.first?.date
     }
 
-    /// Match currency-style amounts: must contain a 2-digit decimal part.
+    /// Match currency-style amounts: must contain a 2-digit decimal part
+    /// (a stray 3rd digit from OCR slips like "$16.317" is also tolerated).
     /// Optional leading `-` (refund) or `$`. Excludes ZIP codes, percentages
     /// like "10.3", item counts, and phone segments.
     private static let amountRegex: NSRegularExpression = {
         return try! NSRegularExpression(
-            pattern: #"(?<![\d.])-?\$?\s?\d{1,3}(?:,\d{3})+\.\d{2}(?!\d)|(?<![\d.])-?\$?\s?\d+\.\d{2}(?!\d)"#
+            pattern: #"(?<![\d.])-?\$?\s?\d{1,3}(?:,\d{3})+\.\d{2,3}(?!\d)|(?<![\d.])-?\$?\s?\d+\.\d{2,3}(?!\d)"#
         )
     }()
 
