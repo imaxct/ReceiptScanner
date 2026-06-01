@@ -12,14 +12,13 @@ import SwiftData
 struct receipt_scannerApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([Receipt.self])
-        // Use the automatic CloudKit database when the iCloud entitlement is
-        // present; SwiftData transparently falls back to local-only otherwise.
-        // If you want to pin to a specific container, replace `.automatic`
-        // with `.private("iCloud.<your.bundle.id>")`.
+        // Local-only store. CloudKit sync requires a paid Apple Developer
+        // account + iCloud entitlement; users can use the JSON export/import
+        // in the Account tab to move data between devices instead.
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .automatic
+            cloudKitDatabase: .none
         )
 
         do {
