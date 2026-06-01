@@ -34,6 +34,8 @@ extension UIImage {
 // MARK: - Root Tabs
 
 struct RootTabView: View {
+    @Environment(\.modelContext) private var modelContext
+
     var body: some View {
         TabView {
             ReceiptListView()
@@ -45,6 +47,27 @@ struct RootTabView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .task { await backfillThumbnailsIfNeeded() }
+    }
+
+    /// One-time background pass that generates thumbnails for receipts created
+    /// before the thumbnail column existed. Safe to run on every launch — once
+    /// every row has a thumbnail, the fetch returns nothing.
+    private func backfillThumbnailsIfNeeded() async {
+        let descriptor = FetchDescriptor<Receipt>()
+        guard let all = try? modelContext.fetch(descriptor) else { return }
+        let needs = all.filter { $0.thumbnailData == nil && $0.imageData != nil }
+        guard !needs.isEmpty else { return }
+
+        for receipt in needs {
+            guard let data = receipt.imageData else { continue }
+            let thumb = await Task.detached(priority: .utility) { () -> Data? in
+                guard let img = UIImage(data: data) else { return nil }
+                return img.thumbnail(maxDimension: 200).jpegData(compressionQuality: 0.7)
+            }.value
+            receipt.thumbnailData = thumb
+        }
+        try? modelContext.save()
     }
 }
 
