@@ -11,17 +11,20 @@ import SwiftData
 @Model
 final class Receipt {
     /// Stable identifier used for deduplication when importing backups.
-    var id: UUID
-    var timestamp: Date
-    var merchant: String
-    var total: Double
-    var tax: Double
-    var note: String
-    var rawText: String
+    /// Named `uuid` (not `id`) to avoid shadowing the `Identifiable`
+    /// conformance synthesized from `persistentModelID`, which would make
+    /// SwiftUI `ForEach` collapse rows that share a default UUID.
+    var uuid: UUID = UUID()
+    var timestamp: Date = Date()
+    var merchant: String = ""
+    var total: Double = 0
+    var tax: Double = 0
+    var note: String = ""
+    var rawText: String = ""
     @Attribute(.externalStorage) var imageData: Data?
 
     init(
-        id: UUID = UUID(),
+        uuid: UUID = UUID(),
         timestamp: Date = Date(),
         merchant: String = "",
         total: Double = 0,
@@ -30,7 +33,7 @@ final class Receipt {
         rawText: String = "",
         imageData: Data? = nil
     ) {
-        self.id = id
+        self.uuid = uuid
         self.timestamp = timestamp
         self.merchant = merchant
         self.total = total
