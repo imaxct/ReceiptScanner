@@ -743,7 +743,7 @@ struct AccountView: View {
             decoder.dateDecodingStrategy = .iso8601
             let backup = try decoder.decode(BackupFile.self, from: data)
 
-            let existingIDs = Set(receipts.map { $0.id })
+            let existingIDs = Set(receipts.map { $0.uuid })
             var added = 0
             for r in backup.receipts where !existingIDs.contains(r.id) {
                 modelContext.insert(r.toReceipt())
@@ -786,7 +786,7 @@ nonisolated struct ReceiptExport: Codable {
     let imageBase64: String?
 
     init(from r: Receipt) {
-        self.id = r.id
+        self.id = r.uuid
         self.timestamp = r.timestamp
         self.merchant = r.merchant
         self.total = r.total
@@ -798,7 +798,7 @@ nonisolated struct ReceiptExport: Codable {
 
     func toReceipt() -> Receipt {
         Receipt(
-            id: id,
+            uuid: id,
             timestamp: timestamp,
             merchant: merchant,
             total: total,
