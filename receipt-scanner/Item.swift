@@ -22,6 +22,8 @@ final class Receipt {
     var note: String = ""
     var rawText: String = ""
     @Attribute(.externalStorage) var imageData: Data?
+    /// Small (~200pt) JPEG used by the list row so we don't decode the full image.
+    @Attribute(.externalStorage) var thumbnailData: Data?
 
     init(
         uuid: UUID = UUID(),
@@ -31,7 +33,8 @@ final class Receipt {
         tax: Double = 0,
         note: String = "",
         rawText: String = "",
-        imageData: Data? = nil
+        imageData: Data? = nil,
+        thumbnailData: Data? = nil
     ) {
         self.uuid = uuid
         self.timestamp = timestamp
@@ -41,5 +44,6 @@ final class Receipt {
         self.note = note
         self.rawText = rawText
         self.imageData = imageData
+        self.thumbnailData = thumbnailData
     }
 }

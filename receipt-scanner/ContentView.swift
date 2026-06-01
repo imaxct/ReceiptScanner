@@ -12,6 +12,25 @@ import Vision
 import UIKit
 import UniformTypeIdentifiers
 
+// MARK: - Image helpers
+
+extension UIImage {
+    /// Generates a downscaled image whose longest side is `maxDimension` points.
+    /// Used to produce ~5–10 KB JPEG thumbnails for fast list rendering.
+    nonisolated func thumbnail(maxDimension: CGFloat = 200) -> UIImage {
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension, longest > 0 else { return self }
+        let scale = maxDimension / longest
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2   // @2x is plenty for a 56pt list cell
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            self.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+}
+
 // MARK: - Root Tabs
 
 struct RootTabView: View {
@@ -119,6 +138,7 @@ struct ReceiptListView: View {
             ReceiptOCR.recognize(in: image) { ocr in
                 let parsed = ReceiptParser.parse(ocr)
                 let data = image.jpegData(compressionQuality: 0.8)
+                let thumbData = image.thumbnail(maxDimension: 200).jpegData(compressionQuality: 0.7)
                 // Prefer the spatially-merged rows for the stored raw text so the
                 // user sees label + amount on the same line.
                 let displayText = ocr.rows.isEmpty ? ocr.text : ocr.rows.joined(separator: "\n")
@@ -129,7 +149,8 @@ struct ReceiptListView: View {
                     tax: parsed.tax ?? 0,
                     note: "",
                     rawText: displayText,
-                    imageData: data
+                    imageData: data,
+                    thumbnailData: thumbData
                 )
                 pendingDraft = draft
             }
@@ -151,21 +172,24 @@ struct ReceiptListView: View {
 
 struct ReceiptRow: View {
     let receipt: Receipt
+    @State private var thumbnail: UIImage?
 
     var body: some View {
         HStack(spacing: 12) {
-            if let data = receipt.imageData, let img = UIImage(data: data) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(width: 56, height: 56)
-                    .overlay(Image(systemName: "doc.text").foregroundStyle(.secondary))
+            Group {
+                if let img = thumbnail {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.2))
+                        .overlay(Image(systemName: "doc.text").foregroundStyle(.secondary))
+                }
             }
+            .frame(width: 56, height: 56)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(receipt.merchant.isEmpty ? "Receipt" : receipt.merchant)
                     .font(.headline)
@@ -184,6 +208,20 @@ struct ReceiptRow: View {
             }
         }
         .padding(.vertical, 4)
+        .task(id: receipt.uuid) {
+            // Decode off the main thread; prefer the small thumbnail, fall back
+            // to the full image (with on-the-fly downsizing) for older receipts.
+            let thumbBytes = receipt.thumbnailData
+            let fullBytes = receipt.imageData
+            let decoded: UIImage? = await Task.detached(priority: .userInitiated) {
+                if let t = thumbBytes, let img = UIImage(data: t) { return img }
+                if let f = fullBytes, let img = UIImage(data: f) {
+                    return img.thumbnail(maxDimension: 200)
+                }
+                return nil
+            }.value
+            self.thumbnail = decoded
+        }
     }
 }
 
@@ -349,6 +387,7 @@ struct ReceiptDraft: Identifiable {
     var note: String
     var rawText: String
     var imageData: Data?
+    var thumbnailData: Data?
 }
 
 struct ReceiptEditorView: View {
@@ -367,6 +406,7 @@ struct ReceiptEditorView: View {
     @State private var taxString: String = ""
     @State private var note: String = ""
     @State private var imageData: Data?
+    @State private var thumbnailData: Data?
     @State private var rawText: String = ""
 
     var body: some View {
@@ -438,6 +478,7 @@ struct ReceiptEditorView: View {
             note = draft.note
             rawText = draft.rawText
             imageData = draft.imageData
+            thumbnailData = draft.thumbnailData
         case .edit(let receipt):
             timestamp = receipt.timestamp
             merchant = receipt.merchant
@@ -446,6 +487,7 @@ struct ReceiptEditorView: View {
             note = receipt.note
             rawText = receipt.rawText
             imageData = receipt.imageData
+            thumbnailData = receipt.thumbnailData
         }
     }
 
@@ -462,7 +504,8 @@ struct ReceiptEditorView: View {
                 tax: tax,
                 note: note,
                 rawText: rawText,
-                imageData: imageData
+                imageData: imageData,
+                thumbnailData: thumbnailData
             )
             onSave(receipt)
         case .edit(let receipt):
@@ -683,7 +726,7 @@ struct SettingsView: View {
                     LabeledContent("Version", value: "1.0")
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle("Settings")
             .fileExporter(
                 isPresented: $isExporting,
                 document: exportDocument,
@@ -796,7 +839,11 @@ nonisolated struct ReceiptExport: Codable {
     }
 
     func toReceipt() -> Receipt {
-        Receipt(
+        let imgData = imageBase64.flatMap { Data(base64Encoded: $0) }
+        let thumb = imgData.flatMap { UIImage(data: $0) }?
+            .thumbnail(maxDimension: 200)
+            .jpegData(compressionQuality: 0.7)
+        return Receipt(
             uuid: id,
             timestamp: timestamp,
             merchant: merchant,
@@ -804,7 +851,8 @@ nonisolated struct ReceiptExport: Codable {
             tax: tax,
             note: note,
             rawText: rawText,
-            imageData: imageBase64.flatMap { Data(base64Encoded: $0) }
+            imageData: imgData,
+            thumbnailData: thumb
         )
     }
 }
