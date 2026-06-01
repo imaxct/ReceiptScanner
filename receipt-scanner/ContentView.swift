@@ -664,52 +664,45 @@ struct AccountView: View {
     }
 }
 
-// MARK: - Document Scanner (single-shot camera)
+// MARK: - Document Scanner (VisionKit)
 
-/// Wraps `UIImagePickerController` in camera mode so the picker auto-dismisses
-/// as soon as the user accepts a single photo. Falls back to the photo library
-/// on devices/simulators without a camera so the flow remains usable.
 struct DocumentScannerView: UIViewControllerRepresentable {
     let completion: (Result<UIImage, Error>) -> Void
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.delegate = context.coordinator
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
-        picker.allowsEditing = false
-        if picker.sourceType == .camera {
-            picker.cameraCaptureMode = .photo
-        }
-        return picker
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let vc = VNDocumentCameraViewController()
+        vc.delegate = context.coordinator
+        return vc
     }
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
 
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
         let completion: (Result<UIImage, Error>) -> Void
         init(completion: @escaping (Result<UIImage, Error>) -> Void) {
             self.completion = completion
         }
 
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            let image = (info[.editedImage] as? UIImage) ?? (info[.originalImage] as? UIImage)
-            picker.dismiss(animated: true) {
-                if let image {
-                    self.completion(.success(image))
-                } else {
-                    self.completion(.failure(NSError(
-                        domain: "Scanner", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "No image captured."]
-                    )))
-                }
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            guard scan.pageCount > 0 else {
+                controller.dismiss(animated: true)
+                completion(.failure(NSError(domain: "Scanner", code: -1, userInfo: [NSLocalizedDescriptionKey: "No pages scanned."])))
+                return
             }
+            let image = scan.imageOfPage(at: 0)
+            controller.dismiss(animated: true)
+            completion(.success(image))
         }
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true)
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            controller.dismiss(animated: true)
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            controller.dismiss(animated: true)
+            completion(.failure(error))
         }
     }
 }
