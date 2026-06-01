@@ -10,6 +10,8 @@ import SwiftData
 
 @Model
 final class Receipt {
+    /// Stable identifier used for deduplication when importing backups.
+    var id: UUID
     var timestamp: Date
     var merchant: String
     var total: Double
@@ -19,6 +21,7 @@ final class Receipt {
     @Attribute(.externalStorage) var imageData: Data?
 
     init(
+        id: UUID = UUID(),
         timestamp: Date = Date(),
         merchant: String = "",
         total: Double = 0,
@@ -27,6 +30,7 @@ final class Receipt {
         rawText: String = "",
         imageData: Data? = nil
     ) {
+        self.id = id
         self.timestamp = timestamp
         self.merchant = merchant
         self.total = total

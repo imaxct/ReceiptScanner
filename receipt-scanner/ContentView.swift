@@ -10,6 +10,7 @@ import SwiftData
 import VisionKit
 import Vision
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - Root Tabs
 
@@ -633,6 +634,15 @@ struct SummaryView: View {
 // MARK: - Account Tab
 
 struct AccountView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var receipts: [Receipt]
+
+    @State private var isExporting = false
+    @State private var isImporting = false
+    @State private var exportDocument: BackupDocument?
+    @State private var statusMessage: String?
+    @State private var isShowingStatus = false
+
     var body: some View {
         NavigationStack {
             List {
@@ -644,15 +654,30 @@ struct AccountView: View {
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading) {
                             Text("Guest").font(.headline)
-                            Text("Sign in coming soon").font(.caption).foregroundStyle(.secondary)
+                            Text("\(receipts.count) receipt\(receipts.count == 1 ? "" : "s") on this device")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 6)
                 }
 
-                Section("Preferences") {
-                    Text("Currency").foregroundStyle(.secondary)
-                    Text("Export Data").foregroundStyle(.secondary)
+                Section {
+                    Button {
+                        startExport()
+                    } label: {
+                        Label("Export Backup", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(receipts.isEmpty)
+
+                    Button {
+                        isImporting = true
+                    } label: {
+                        Label("Import Backup", systemImage: "square.and.arrow.down")
+                    }
+                } header: {
+                    Text("Backup")
+                } footer: {
+                    Text("Export saves all receipts and images into a single .json file you can store in iCloud Drive, Files, or AirDrop to another iPhone. Import merges receipts from a backup file (duplicates are skipped).")
                 }
 
                 Section("About") {
@@ -660,7 +685,162 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("Account")
+            .fileExporter(
+                isPresented: $isExporting,
+                document: exportDocument,
+                contentType: .json,
+                defaultFilename: defaultExportFilename()
+            ) { result in
+                switch result {
+                case .success: showStatus("Exported \(receipts.count) receipts")
+                case .failure(let error): showStatus("Export failed: \(error.localizedDescription)")
+                }
+                exportDocument = nil
+            }
+            .fileImporter(
+                isPresented: $isImporting,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { importBackup(from: url) }
+                case .failure(let error):
+                    showStatus("Import failed: \(error.localizedDescription)")
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if isShowingStatus, let msg = statusMessage {
+                    Text(msg)
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(.bottom, 24)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
         }
+    }
+
+    private func startExport() {
+        let payload = BackupFile(
+            version: 1,
+            exportedAt: Date(),
+            receipts: receipts.map { ReceiptExport(from: $0) }
+        )
+        exportDocument = BackupDocument(backup: payload)
+        isExporting = true
+    }
+
+    private func importBackup(from url: URL) {
+        // Security-scoped resource access is required for files outside the app sandbox.
+        let needsAccess = url.startAccessingSecurityScopedResource()
+        defer { if needsAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let backup = try decoder.decode(BackupFile.self, from: data)
+
+            let existingIDs = Set(receipts.map { $0.id })
+            var added = 0
+            for r in backup.receipts where !existingIDs.contains(r.id) {
+                modelContext.insert(r.toReceipt())
+                added += 1
+            }
+            try? modelContext.save()
+            let skipped = backup.receipts.count - added
+            showStatus("Imported \(added), skipped \(skipped) duplicate\(skipped == 1 ? "" : "s")")
+        } catch {
+            showStatus("Import failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func defaultExportFilename() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return "receipts-\(f.string(from: Date()))"
+    }
+
+    private func showStatus(_ message: String) {
+        statusMessage = message
+        withAnimation { isShowingStatus = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation { isShowingStatus = false }
+        }
+    }
+}
+
+// MARK: - Backup Format
+
+nonisolated struct ReceiptExport: Codable {
+    let id: UUID
+    let timestamp: Date
+    let merchant: String
+    let total: Double
+    let tax: Double
+    let note: String
+    let rawText: String
+    /// Base64-encoded JPEG/PNG image data. Optional.
+    let imageBase64: String?
+
+    init(from r: Receipt) {
+        self.id = r.id
+        self.timestamp = r.timestamp
+        self.merchant = r.merchant
+        self.total = r.total
+        self.tax = r.tax
+        self.note = r.note
+        self.rawText = r.rawText
+        self.imageBase64 = r.imageData?.base64EncodedString()
+    }
+
+    func toReceipt() -> Receipt {
+        Receipt(
+            id: id,
+            timestamp: timestamp,
+            merchant: merchant,
+            total: total,
+            tax: tax,
+            note: note,
+            rawText: rawText,
+            imageData: imageBase64.flatMap { Data(base64Encoded: $0) }
+        )
+    }
+}
+
+nonisolated struct BackupFile: Codable {
+    let version: Int
+    let exportedAt: Date
+    let receipts: [ReceiptExport]
+}
+
+nonisolated struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    static var writableContentTypes: [UTType] { [.json] }
+
+    var backup: BackupFile
+
+    init(backup: BackupFile) {
+        self.backup = backup
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.backup = try decoder.decode(BackupFile.self, from: data)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(backup)
+        return FileWrapper(regularFileWithContents: data)
     }
 }
 
