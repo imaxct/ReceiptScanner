@@ -23,8 +23,8 @@ struct RootTabView: View {
             SummaryView()
                 .tabItem { Label("Summary", systemImage: "chart.bar.xaxis") }
 
-            AccountView()
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
     }
 }
@@ -631,9 +631,9 @@ struct SummaryView: View {
     }
 }
 
-// MARK: - Account Tab
+// MARK: - Settings Tab
 
-struct AccountView: View {
+struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var receipts: [Receipt]
 
@@ -646,19 +646,18 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    HStack(spacing: 16) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .resizable()
-                            .frame(width: 64, height: 64)
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading) {
-                            Text("Guest").font(.headline)
-                            Text("\(receipts.count) receipt\(receipts.count == 1 ? "" : "s") on this device")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 6)
+                Section("Library") {
+                    LabeledContent("Receipts", value: "\(receipts.count)")
+                    LabeledContent(
+                        "Total Spent",
+                        value: receipts.reduce(0) { $0 + $1.total }
+                            .formatted(.currency(code: "USD"))
+                    )
+                    LabeledContent(
+                        "Total Tax",
+                        value: receipts.reduce(0) { $0 + $1.tax }
+                            .formatted(.currency(code: "USD"))
+                    )
                 }
 
                 Section {
